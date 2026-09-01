@@ -71,6 +71,19 @@ but `./build.sh` is the canonical path: this machine's xcodebuild fails without 
   `osascript -e 'tell application "System Events" to tell application process "NetBar" to get name of menu bar item 1 of menu bar 2'`
   returns the live label text.
 
+## Distribution (public page - keep in sync on every release)
+
+NetBar is published at https://mivehchi.app/netbar (repo `domains/mivehchi.app`, Cloudflare
+Workers). The downloadable zip is a VENDORED BINARY with no drift gate, so a netbar release
+does not reach the page by itself. On every release:
+
+1. `./build.sh`, then `ditto -c -k --keepParent build/NetBar.app NetBar.zip`
+2. Replace `domains/mivehchi.app/public/downloads/NetBar.zip`
+3. Bump the version + size strings in `domains/mivehchi.app/app/(app)/netbar/page.tsx`
+   (two places: button label and the meta line) and the Details list if specs changed
+4. `npm run gate` there, ship via auto-ship, `npm run deploy`, verify `x-build` == HEAD
+   and the zip byte-count at https://mivehchi.app/downloads/NetBar.zip
+
 ## Efficiency gate (run before claiming "efficient")
 
 Release build, panel CLOSED, no AX polling during the window: take a
