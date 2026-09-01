@@ -10,9 +10,10 @@ struct PanelView: View {
     private let labelColumn: CGFloat = 60
 
     var body: some View {
+        let samples = model.ring.ordered
         VStack(alignment: .leading, spacing: 8) {
-            speedHeader
-            SparklineView(samples: model.ring.ordered)
+            speedHeader(samples: samples)
+            SparklineView(model: model, samples: samples)
             Divider()
             infoRows
             Divider()
@@ -23,11 +24,23 @@ struct PanelView: View {
         .task { await model.panelOpened() }
     }
 
-    private var speedHeader: some View {
-        HStack(spacing: 12) {
-            speedBlock(arrow: "\u{2193}", value: model.current.downMbps, tint: .accentColor)
-            speedBlock(arrow: "\u{2191}", value: model.current.upMbps, tint: .secondary)
+    // Hovering the sparkline swaps the header to that moment's values plus an age hint.
+    private func speedHeader(samples: [SpeedSample]) -> some View {
+        let hovered: (SpeedSample, Int)? = {
+            guard let i = model.hoverIndex, i >= 0, i < samples.count else { return nil }
+            return (samples[i], (samples.count - 1 - i) * 2)
+        }()
+        let shown = hovered?.0 ?? model.current
+        return HStack(spacing: 12) {
+            speedBlock(arrow: "\u{2193}", value: shown.downMbps, tint: .accentColor)
+            speedBlock(arrow: "\u{2191}", value: shown.upMbps, tint: .secondary)
             Spacer()
+            if let (_, age) = hovered {
+                Text(age == 0 ? "now" : "-\(age)s")
+                    .font(.caption2)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

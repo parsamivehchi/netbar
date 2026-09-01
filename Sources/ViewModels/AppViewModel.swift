@@ -18,6 +18,10 @@ final class AppViewModel {
     private(set) var publicIP: String?
     private(set) var fetchingPublicIP = false
 
+    // Sparkline hover (panel-only state; lives here because @State is a SwiftUI macro
+    // the CLT toolchain cannot expand - see CLAUDE.md). nil = not hovering.
+    var hoverIndex: Int?
+
     let wifi = WiFiMonitor()
     let loginItem = LoginItemService()
 
