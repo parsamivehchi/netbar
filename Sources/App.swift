@@ -14,10 +14,20 @@ struct NetBarApp: App {
         MenuBarExtra {
             PanelView(model: model)
         } label: {
-            Text(model.label)
-                .font(.system(size: 12))
-                .monospacedDigit()
-                .task { model.start() }
+            Group {
+                if model.barStyle == .stacked {
+                    // An image label is the ONLY way to stack two lines: MenuBarExtra
+                    // flattens its label to a single text line (verified on macOS 27 -
+                    // a VStack of two Texts renders only the first line).
+                    Image(nsImage: model.labelImage)
+                } else {
+                    Text(model.label)
+                        .font(.system(size: 12))
+                        .monospacedDigit()
+                }
+            }
+            .accessibilityLabel(Text(model.label))
+            .task { model.start() }
         }
         .menuBarExtraStyle(.window)
     }
