@@ -1,11 +1,34 @@
 import AppKit
 import Observation
 
+/// How the menu bar item renders. Persisted in UserDefaults; a stored value outside
+/// the known cases is discarded and the default wins (validate, never trust storage).
+enum BarStyle: String, CaseIterable {
+    case stacked  // two tiny lines, ~35px: "↓12.4" over "↑0.8" (default)
+    case wide     // one line, ~95px: "↓12.4 ↑0.8 Mbps"
+
+    static let defaultsKey = "barStyle"
+}
+
 @MainActor
 @Observable
 final class AppViewModel {
-    // Menu bar
+    // Menu bar. `label` is the wide one-line text (also the accessibility name);
+    // `labelImage` is the stacked two-line render used when barStyle == .stacked.
     private(set) var label = "\u{2193}0.0 \u{2191}0.0 Mbps"
+    private(set) var labelImage = AppViewModel.renderStacked(down: "\u{2007}0.0", up: "\u{2007}0.0")
+    private(set) var barStyle: BarStyle = {
+        guard let raw = UserDefaults.standard.string(forKey: BarStyle.defaultsKey),
+              let style = BarStyle(rawValue: raw) else { return .stacked }
+        return style
+    }()
+
+    func setBarStyle(_ style: BarStyle) {
+        guard style != barStyle else { return }
+        barStyle = style
+        UserDefaults.standard.set(style.rawValue, forKey: BarStyle.defaultsKey)
+        refreshLabel(with: current, force: true)
+    }
 
     // Live state (observed only while the panel is open)
     private(set) var current = SpeedSample.zero
@@ -68,9 +91,51 @@ final class AppViewModel {
         totalOutBytes &+= tick.deltaOutBytes
         if tick.interfaceName != interfaceName { interfaceName = tick.interfaceName }
         if tick.router != routerIP { routerIP = tick.router }
-        // The redraw gate: only touch the observed label when the rendered text changes.
-        let newLabel = Self.format(tick.sample)
-        if newLabel != label { label = newLabel }
+        refreshLabel(with: tick.sample, force: false)
+    }
+
+    // The redraw gate: only touch the observed label/image when the rendered TEXT
+    // changes - assigning either re-renders the menu bar item.
+    private func refreshLabel(with sample: SpeedSample, force: Bool) {
+        let newLabel = Self.format(sample)
+        let changed = newLabel != label
+        if changed { label = newLabel }
+        if barStyle == .stacked, changed || force {
+            labelImage = stackedImage(down: Self.fmt(sample.downMbps),
+                                      up: Self.fmt(sample.upMbps))
+        }
+    }
+
+    // At idle the label bounces between a handful of states (0.0/0.1 pairs), so a
+    // small cache makes most ticks reuse an already-rendered image instead of
+    // allocating + drawing a fresh NSImage - that churn measured ~0.6% extra CPU.
+    private var imageCache: [String: NSImage] = [:]
+
+    private func stackedImage(down: String, up: String) -> NSImage {
+        let key = "\(down)|\(up)"
+        if let hit = imageCache[key] { return hit }
+        if imageCache.count > 64 { imageCache.removeAll(keepingCapacity: true) }
+        let image = Self.renderStacked(down: down, up: up)
+        imageCache[key] = image
+        return image
+    }
+
+    /// Two right-aligned 9pt lines drawn into a TEMPLATE image (alpha-only, so the
+    /// system recolors it for light/dark menu bars). An image label is the only way
+    /// to stack two lines - MenuBarExtra flattens text labels to a single line.
+    private static func renderStacked(down: String, up: String) -> NSImage {
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
+        let l1 = NSAttributedString(string: "\u{2193}\(down)", attributes: attrs)
+        let l2 = NSAttributedString(string: "\u{2191}\(up)", attributes: attrs)
+        let width = ceil(max(l1.size().width, l2.size().width))
+        let image = NSImage(size: NSSize(width: width, height: 21), flipped: false) { rect in
+            l1.draw(at: NSPoint(x: rect.width - ceil(l1.size().width), y: 10.5))
+            l2.draw(at: NSPoint(x: rect.width - ceil(l2.size().width), y: 0))
+            return true
+        }
+        image.isTemplate = true
+        return image
     }
 
     // MARK: - Display sleep: pause sampling (nothing is visible), reset baseline on wake

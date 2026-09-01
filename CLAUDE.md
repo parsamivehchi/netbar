@@ -1,7 +1,9 @@
 # netbar
 
 NetBar - native SwiftUI menu bar network monitor for the MacBook Air. Shows live
-down/up throughput (`↓12.4 ↑0.8 Mbps`, compact fixed-width) in the menu bar; the
+down/up throughput in the menu bar - default is a STACKED two-line ~35px item
+(`↓12.4` over `↑0.8`, 9pt); a panel picker switches to the wide one-line
+`↓12.4 ↑0.8 Mbps` form (persisted `barStyle` in UserDefaults, validated on read); the
 click-open panel shows Wi-Fi SSID, interface, local IP, router IP, public IP
 (on-demand only, 5 min cache), session totals, and a 2 min sparkline (60 slots x 2 s)
 with hover inspection (crosshair + the header swaps to the hovered moment's values).
@@ -52,6 +54,13 @@ but `./build.sh` is the canonical path: this machine's xcodebuild fails without 
   figure spaces (U+2007) + monospacedDigit; a width change forces a bar-wide relayout.
   Together with the assign-only-on-change gate this took closed-panel CPU from 1.15%
   to 0.30% avg. Do not return to 1 s ticks or unpadded values.
+- **The stacked style MUST be an NSImage label, and the images MUST be cached.**
+  MenuBarExtra flattens its label to one text line (verified macOS 27: a VStack of
+  two Texts renders only the first), so stacking requires `Image(nsImage:)` - a
+  template image (alpha-only) so the system recolors it per menu bar appearance.
+  Allocating a fresh NSImage per tick measured 0.95% CPU / 72 MB; the per-string-pair
+  cache in AppViewModel.stackedImage brings it to 0.18% / 17 MB because idle traffic
+  bounces between a handful of label states. Do not remove the cache.
 - Counters come from `sysctl NET_RT_IFLIST2` (64-bit `if_data64`), never `getifaddrs`
   (32-bit counters wrap in ~34 s at 1 Gbps). Walk records with `loadUnaligned`, never
   `load(as:)` - records are packed at `ifm_msglen` strides.

@@ -122,6 +122,22 @@ struct PanelView: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
+                Text("Bar style")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .frame(width: labelColumn, alignment: .leading)
+                Picker("Bar style", selection: Binding(
+                    get: { model.barStyle },
+                    set: { model.setBarStyle($0) }
+                )) {
+                    Text("Stacked").tag(BarStyle.stacked)
+                    Text("Wide").tag(BarStyle.wide)
+                }
+                .pickerStyle(.segmented)
+                .controlSize(.small)
+                .labelsHidden()
+            }
+            HStack {
                 Toggle("Launch at login", isOn: Binding(
                     get: { model.loginItem.enabled },
                     set: { model.loginItem.setEnabled($0) }
