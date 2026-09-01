@@ -1,0 +1,33 @@
+name: NetBar
+options:
+  bundleIdPrefix: com.parsa
+  deploymentTarget:
+    macOS: "26.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    PRODUCT_BUNDLE_IDENTIFIER: com.parsa.netbar
+targets:
+  NetBar:
+    type: application
+    platform: macOS
+    sources:
+      - Sources
+    dependencies:
+      - sdk: CoreWLAN.framework
+      - sdk: CoreLocation.framework
+      - sdk: SystemConfiguration.framework
+      - sdk: ServiceManagement.framework
+    settings:
+      base:
+        # Ad-hoc SIGNED (battcal style), not CODE_SIGNING_ALLOWED=false: TCC location
+        # attribution and SMAppService both want a signed bundle.
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_APP_SANDBOX: NO
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_LSUIElement: true
+        INFOPLIST_KEY_CFBundleDisplayName: NetBar
+        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "NetBar reads your Wi-Fi network name to display it. Location is never tracked."
