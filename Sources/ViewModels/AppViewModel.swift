@@ -15,13 +15,106 @@ enum BarStyle: String, CaseIterable {
 final class AppViewModel {
     // Menu bar. `label` is the wide one-line text (also the accessibility name);
     // `labelImage` is the stacked two-line render used when barStyle == .stacked.
-    private(set) var label = "\u{2193}0.0 \u{2191}0.0 Mbps"
-    private(set) var labelImage = AppViewModel.renderStacked(down: "\u{2007}0.0", up: "\u{2007}0.0")
+    private(set) var label = AppViewModel.format(.zero, units: .bits)
+    private(set) var labelImage = AppViewModel.renderStacked(
+        down: ScaledRate(mbps: 0, units: .bits), up: ScaledRate(mbps: 0, units: .bits), dimDown: true, dimUp: true)
     private(set) var barStyle: BarStyle = {
         guard let raw = UserDefaults.standard.string(forKey: BarStyle.defaultsKey),
               let style = BarStyle(rawValue: raw) else { return .stacked }
         return style
     }()
+
+    private(set) var units: RateUnits = {
+        guard let raw = UserDefaults.standard.string(forKey: RateUnits.defaultsKey),
+              let u = RateUnits(rawValue: raw) else { return .bits }
+        return u
+    }()
+
+    func setUnits(_ u: RateUnits) {
+        guard u != units else { return }
+        units = u
+        UserDefaults.standard.set(u.rawValue, forKey: RateUnits.defaultsKey)
+        refreshLabel(with: current, force: true)
+    }
+
+    // Privacy mode: identifying rows (SSID, local IP, router, public IP) render masked.
+    // Persisted; the reveal window is not. Demo renders can force it via NETBAR_DEMO_PRIVACY=1.
+    private(set) var privacyMode: Bool =
+        DemoFixture.isActive ? DemoFixture.privacy : UserDefaults.standard.bool(forKey: "privacyMode")
+    private(set) var revealUntil: Date?
+    private var revealTask: Task<Void, Never>?
+
+    func setPrivacyMode(_ on: Bool) {
+        guard on != privacyMode else { return }
+        privacyMode = on
+        revealUntil = nil
+        revealTask?.cancel()
+        UserDefaults.standard.set(on, forKey: "privacyMode")
+    }
+
+    /// True when identifying rows should be shown in clear.
+    var identifiersVisible: Bool {
+        if !privacyMode { return true }
+        if let until = revealUntil { return until > Date() }
+        return false
+    }
+
+    /// Show the masked rows for a few seconds, then re-mask.
+    func revealBriefly(seconds: Double = 8) {
+        revealUntil = Date().addingTimeInterval(seconds)
+        revealTask?.cancel()
+        revealTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            self?.revealUntil = nil
+        }
+    }
+
+    /// Whether the panel may look up the WAN address at all (default on).
+    private(set) var publicIPLookup: Bool = {
+        let d = UserDefaults.standard
+        return d.object(forKey: "publicIPLookup") == nil ? true : d.bool(forKey: "publicIPLookup")
+    }()
+
+    func setPublicIPLookup(_ on: Bool) {
+        guard on != publicIPLookup else { return }
+        publicIPLookup = on
+        UserDefaults.standard.set(on, forKey: "publicIPLookup")
+        if !on { publicIP = nil }
+    }
+
+    // Click-to-copy feedback: the label of the row copied within the last ~1 s.
+    private(set) var copiedKey: String?
+    private var copiedTask: Task<Void, Never>?
+
+    /// Copies a row's value; masked rows copy nothing (privacy must not leak via clipboard).
+    func copyRow(label: String, value: String?, identifying: Bool) {
+        guard let value, !value.isEmpty, !(identifying && !identifiersVisible) else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(value, forType: .string)
+        copiedKey = label
+        copiedTask?.cancel()
+        copiedTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.2))
+            guard !Task.isCancelled else { return }
+            if self?.copiedKey == label { self?.copiedKey = nil }
+        }
+    }
+
+    // Session
+    private(set) var sessionStart = Date()
+
+    /// Zero the totals and the sparkline; the next sample starts from a clean baseline.
+    func resetSession() {
+        totalInBytes = 0
+        totalOutBytes = 0
+        ring.removeAll()
+        sessionStart = Date()
+        if !DemoFixture.isActive {
+            Task { [sampler] in await sampler.resetBaseline() }
+        }
+    }
 
     func setBarStyle(_ style: BarStyle) {
         guard style != barStyle else { return }
@@ -117,41 +210,66 @@ final class AppViewModel {
     // The redraw gate: only touch the observed label/image when the rendered TEXT
     // changes - assigning either re-renders the menu bar item.
     private func refreshLabel(with sample: SpeedSample, force: Bool) {
-        let newLabel = Self.format(sample)
+        let newLabel = Self.format(sample, units: units)
         let changed = newLabel != label
         if changed { label = newLabel }
         if barStyle == .stacked, changed || force {
-            labelImage = stackedImage(down: Self.fmt(sample.downMbps),
-                                      up: Self.fmt(sample.upMbps))
+            labelImage = stackedImage(down: ScaledRate(mbps: sample.downMbps, units: units),
+                                      up: ScaledRate(mbps: sample.upMbps, units: units),
+                                      dimDown: sample.downMbps < Self.idleMbps,
+                                      dimUp: sample.upMbps < Self.idleMbps)
         }
     }
+
+    /// Below this a line is drawn dimmed: the eye reads "quiet" without parsing a number.
+    static let idleMbps = 0.05
 
     // At idle the label bounces between a handful of states (0.0/0.1 pairs), so a
     // small cache makes most ticks reuse an already-rendered image instead of
     // allocating + drawing a fresh NSImage - that churn measured ~0.6% extra CPU.
     private var imageCache: [String: NSImage] = [:]
 
-    private func stackedImage(down: String, up: String) -> NSImage {
-        let key = "\(down)|\(up)"
+    private func stackedImage(down: ScaledRate, up: ScaledRate, dimDown: Bool, dimUp: Bool) -> NSImage {
+        let key = "\(down.value)|\(down.unit)|\(up.value)|\(up.unit)|\(dimDown)\(dimUp)"
         if let hit = imageCache[key] { return hit }
         if imageCache.count > 64 { imageCache.removeAll(keepingCapacity: true) }
-        let image = Self.renderStacked(down: down, up: up)
+        let image = Self.renderStacked(down: down, up: up, dimDown: dimDown, dimUp: dimUp)
         imageCache[key] = image
         return image
     }
 
-    /// Two right-aligned 9pt lines drawn into a TEMPLATE image (alpha-only, so the
-    /// system recolors it for light/dark menu bars). An image label is the only way
-    /// to stack two lines - MenuBarExtra flattens text labels to a single line.
-    private static func renderStacked(down: String, up: String) -> NSImage {
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium)
-        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
-        let l1 = NSAttributedString(string: "\u{2193}\(down)", attributes: attrs)
-        let l2 = NSAttributedString(string: "\u{2191}\(up)", attributes: attrs)
-        let width = ceil(max(l1.size().width, l2.size().width))
-        let image = NSImage(size: NSSize(width: width, height: 21), flipped: false) { rect in
-            l1.draw(at: NSPoint(x: rect.width - ceil(l1.size().width), y: 10.5))
-            l2.draw(at: NSPoint(x: rect.width - ceil(l2.size().width), y: 0))
+    /// Two lines drawn into a TEMPLATE image (alpha-only, so the system recolors it for
+    /// light/dark menu bars). An image label is the only way to stack two lines -
+    /// MenuBarExtra flattens text labels to a single line.
+    ///
+    /// Layout is three aligned columns so the digits of both lines sit under each other:
+    ///   [arrow 7pt][value, right-aligned, 4 figure-space-padded chars][unit 6.5pt, dimmer]
+    /// A line under `idleMbps` draws at reduced alpha.
+    static func renderStacked(down: ScaledRate, up: ScaledRate, dimDown: Bool, dimUp: Bool) -> NSImage {
+        let valueFont = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .medium)
+        let unitFont = NSFont.systemFont(ofSize: 6.5, weight: .medium)
+        let arrowFont = NSFont.systemFont(ofSize: 8, weight: .semibold)
+        func attrs(_ font: NSFont, alpha: CGFloat) -> [NSAttributedString.Key: Any] {
+            [.font: font, .foregroundColor: NSColor.black.withAlphaComponent(alpha)]
+        }
+        let arrowW: CGFloat = 7
+        let unitW: CGFloat = 12
+        let valueW = ceil(NSAttributedString(string: "\u{2007}\u{2007}\u{2007}\u{2007}", attributes: attrs(valueFont, alpha: 1)).size().width)
+        let width = arrowW + valueW + 1 + unitW
+        let lines: [(arrow: String, rate: ScaledRate, dim: Bool, baseline: CGFloat)] = [
+            ("\u{2193}", down, dimDown, 11),
+            ("\u{2191}", up, dimUp, 1),
+        ]
+        let image = NSImage(size: NSSize(width: width, height: 21), flipped: false) { _ in
+            for line in lines {
+                let a: CGFloat = line.dim ? 0.45 : 1
+                NSAttributedString(string: line.arrow, attributes: attrs(arrowFont, alpha: a))
+                    .draw(at: NSPoint(x: 0, y: line.baseline))
+                let v = NSAttributedString(string: line.rate.padded(), attributes: attrs(valueFont, alpha: a))
+                v.draw(at: NSPoint(x: arrowW + valueW - ceil(v.size().width), y: line.baseline))
+                NSAttributedString(string: line.rate.unit, attributes: attrs(unitFont, alpha: a * 0.7))
+                    .draw(at: NSPoint(x: arrowW + valueW + 1, y: line.baseline + 0.5))
+            }
             return true
         }
         image.isTemplate = true
@@ -193,6 +311,7 @@ final class AppViewModel {
         wifi.read()
         loginItem.refresh()
         localIP = interfaceName.flatMap { NetworkInfo.localIPv4(interface: $0) }
+        guard publicIPLookup else { return }
         fetchingPublicIP = true
         let ip = await publicIPService.fetch()
         guard !Task.isCancelled else { return }
@@ -203,19 +322,13 @@ final class AppViewModel {
     // MARK: - Formatting
 
     // Compact on purpose (owner ask 2026-09-01): no space after the arrows, single
-    // space between groups - menu bar width is scarce on the notched Air.
+    // space between groups - menu bar width is scarce on a notched MacBook.
     // Values are padded to a FIXED width with figure spaces (U+2007): a label whose
-    // width changes forces a relayout of the entire menu bar on every tick.
-    static func format(_ s: SpeedSample) -> String {
-        "\u{2193}\(fmt(s.downMbps)) \u{2191}\(fmt(s.upMbps)) Mbps"
-    }
-
-    private static func fmt(_ mbps: Double) -> String {
-        let text = mbps >= 999.95 ? String(format: "%.2fG", mbps / 1000)
-                                  : String(format: "%.1f", mbps)
-        // Pad to 4 chars (stable width across 0-99.9 Mbps, the common band) rather
-        // than 5: reserving room for 3-digit speeds at all times wastes bar space.
-        let pad = max(0, 4 - text.count)
-        return String(repeating: "\u{2007}", count: pad) + text
+    // width changes forces a relayout of the entire menu bar on every tick. Units are
+    // attached and auto-scaled (v1.2): "\u{2193}12.4Mb \u{2191}812Kb".
+    static func format(_ s: SpeedSample, units: RateUnits) -> String {
+        let d = ScaledRate(mbps: s.downMbps, units: units)
+        let u = ScaledRate(mbps: s.upMbps, units: units)
+        return "\u{2193}\(d.padded())\(d.unit) \u{2191}\(u.padded())\(u.unit)"
     }
 }

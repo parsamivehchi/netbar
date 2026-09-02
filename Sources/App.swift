@@ -14,6 +14,10 @@ struct NetBarApp: App {
         // renders the panel on sample data to a 2x PNG and exits before any window,
         // status item, or sampler exists. Used for the README and the product page so
         // no capture is ever taken from a live session (see DemoFixture).
+        if let path = DemoFixture.labelRenderPath {
+            guard DemoFixture.isActive else { exit(2) }
+            exit(PanelRenderer.renderLabel(model: sharedModel, to: path) ? 0 : 1)
+        }
         if let path = DemoFixture.renderPath {
             guard DemoFixture.isActive else {
                 FileHandle.standardError.write(Data("NETBAR_RENDER_PANEL requires NETBAR_DEMO=1 (never render live data)\n".utf8))

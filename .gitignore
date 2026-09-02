@@ -11,3 +11,4 @@ DerivedData/
 # local session archives + breadcrumbs (fold into a PR when convenient)
 progress/
 .claude/
+NetBar.zip

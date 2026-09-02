@@ -12,6 +12,11 @@ struct RingBuffer: Sendable {
         storage = Array(repeating: .zero, count: capacity)
     }
 
+    mutating func removeAll() {
+        head = 0
+        count = 0
+    }
+
     mutating func append(_ sample: SpeedSample) {
         storage[head] = sample
         head = (head + 1) % capacity

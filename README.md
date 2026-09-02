@@ -9,20 +9,34 @@ no background network calls - and idles at about 0.18% CPU in 17 MB of memory.
 
 ![The NetBar panel on sample data](docs/panel.png)
 
-*Screenshot rendered from the app's built-in demo fixture. Every value in it is sample data
+*Screenshots are rendered from the app's built-in demo fixture. Every value in them is sample data
 (RFC 5737 addresses, a placeholder SSID); NetBar never ships a capture of a live session.*
 
-Download: [mivehchi.app/netbar](https://mivehchi.app/netbar) (free, ~110 KB zip, macOS 26+).
+The menu bar item, stacked style: arrow, auto-scaled value, small unit. Quiet lines dim.
+
+![The stacked menu bar item](docs/menubar.png)
+
+Download: [mivehchi.app/netbar](https://mivehchi.app/netbar) (free, ~120 KB zip, macOS 26+).
 
 ## What it shows
 
 | Surface | Content |
 |---|---|
-| Menu bar | Stacked two-line item (`↓12.4` over `↑0.8`, about 35 px wide) by default, or a wide one-line `↓12.4 ↑0.8 Mbps` form - pick in the panel |
-| Panel header | Current down / up in Mbps; hovering the sparkline swaps in that moment's values and its age |
-| Sparkline | 60 samples x 2 s = the last two minutes, down in the accent colour, up in grey |
-| Rows | Wi-Fi SSID, primary interface, local IPv4, router, public IP (fetched only while the panel is open, cached 5 min), session totals since launch |
-| Footer | Bar style picker, launch-at-login toggle (SMAppService), Quit |
+| Menu bar | Stacked two-line item (`↓12.4Mb` over `↑812Kb`, about 40 px wide) by default, or a wide one-line `↓12.4Mb ↑812Kb` form. Values auto-scale (Kb / Mb / Gb per second, or KB / MB / GB) with the unit drawn smaller; a line under 50 Kb/s dims |
+| Panel header | Current down / up, plus the two-minute peak and average; hovering the sparkline swaps in that moment's values and its age |
+| Sparkline | 60 samples x 2 s = the last two minutes, down in the accent colour, up in grey, with the scale's top value labelled |
+| Rows | Wi-Fi SSID, primary interface, local IPv4, router, public IP (fetched only while the panel is open, cached 5 min, can be switched off), session totals with a since-time and a reset button. Click any value to copy it |
+| Footer | Bar style and unit pickers, privacy mode, public-IP lookup switch, launch-at-login (SMAppService), Quit |
+
+## Privacy mode
+
+Sharing your screen, recording a demo, or just do not want the network name on a menu you open
+often? Tick **Privacy mode** in the footer: the Wi-Fi name, local IP, router and public IP render
+as dots. The eye button reveals them for eight seconds. A masked row copies nothing to the
+clipboard, and the **Look up public IP** switch stops the app from ever asking the internet for
+your address.
+
+![The panel with privacy mode on](docs/panel-privacy.png)
 
 ## Install
 
@@ -60,6 +74,8 @@ to a 2x PNG and exit, which is how `docs/panel.png` is produced:
 
 ```sh
 NETBAR_DEMO=1 NETBAR_RENDER_PANEL="$PWD/docs/panel.png" build/NetBar.app/Contents/MacOS/NetBar
+NETBAR_DEMO=1 NETBAR_DEMO_PRIVACY=1 NETBAR_RENDER_PANEL="$PWD/docs/panel-privacy.png" build/NetBar.app/Contents/MacOS/NetBar
+NETBAR_DEMO=1 NETBAR_RENDER_LABEL="$PWD/docs/menubar.png" build/NetBar.app/Contents/MacOS/NetBar
 ```
 
 Use these for any screenshot you publish. A capture of a live session carries your real
