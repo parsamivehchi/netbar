@@ -7,3 +7,7 @@ DerivedData/
 
 # macOS
 .DS_Store
+
+# local session archives + breadcrumbs (fold into a PR when convenient)
+progress/
+.claude/

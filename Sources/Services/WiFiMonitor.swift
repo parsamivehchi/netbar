@@ -15,8 +15,18 @@ final class WiFiMonitor: NSObject {
 
     private let cw = CWWiFiClient.shared()
     private let loc = CLLocationManager()
+    private let demo: Bool
+
+    /// Demo mode: a fixed SSID, no Location prompt, no CoreWLAN monitoring.
+    init(demoSSID: String) {
+        demo = true
+        super.init()
+        ssid = demoSSID
+        auth = .authorized
+    }
 
     override init() {
+        demo = false
         super.init()
         loc.delegate = self
         auth = loc.authorizationStatus
@@ -41,6 +51,7 @@ final class WiFiMonitor: NSObject {
     }
 
     func read() {
+        if demo { return }
         let s = cw.interface()?.ssid()
         if s != ssid { ssid = s }
     }
