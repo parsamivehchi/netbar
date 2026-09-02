@@ -91,7 +91,8 @@ struct PanelView: View {
         VStack(alignment: .leading, spacing: 3) {
             linkRow
             if model.linkKind == .wifi { wifiRow }
-            row("Interface", model.interfaceName, identifying: false)
+            if model.starlinkReachable == true { starlinkRow }
+            interfaceRow
             row("Local IP", model.localIP, identifying: true)
             row("Router", model.routerIP, identifying: true)
             publicIPRow
@@ -148,6 +149,79 @@ struct PanelView: View {
             return "Signal \(r.rssi) dBm, noise \(r.noise) dBm, link rate \(Int(r.txRateMbps)) Mb/s"
         }
         return model.linkMbps > 0 ? "Negotiated link speed \(Int(model.linkMbps)) Mb/s" : model.linkKind.title
+    }
+
+    /// Plain row with one candidate; a menu picker once several interfaces are up (v1.4). The
+    /// AppKit popup cannot render off-window and the demo fixture has one interface, so the
+    /// product render always takes the plain branch.
+    @ViewBuilder
+    private var interfaceRow: some View {
+        if model.interfaces.count >= 2 {
+            let override = model.interfaceOverride
+            // A pinned interface that is currently down still needs a tag, or the popup goes blank.
+            let options = override.map { model.interfaces.contains($0) ? model.interfaces : model.interfaces + [$0] }
+                ?? model.interfaces
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                rowLabel("Interface")
+                Picker("", selection: Binding(get: { override ?? "" },
+                                              set: { model.setInterfaceOverride($0.isEmpty ? nil : $0) })) {
+                    Text("Auto (\(model.primaryInterfaceName ?? "-"))").tag("")
+                    ForEach(options, id: \.self) { name in
+                        Text("\(name) \u{00B7} \(LinkInfo.kind(of: name).title)").tag(name)
+                    }
+                }
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                .labelsHidden()
+                .font(.system(size: 11))
+                .fixedSize()
+                if override != nil, !model.overrideHonored {
+                    Text("down, using auto")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .help("Which interface the menu bar counts; Auto follows the system's primary interface")
+        } else {
+            row("Interface", model.interfaceName, identifying: false)
+        }
+    }
+
+    /// Shown only when a dish answered on the LAN (probed on panel open). No identifying value is
+    /// displayed, so the row stays visible in privacy mode.
+    private var starlinkRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            rowLabel("Starlink")
+            Image(systemName: "antenna.radiowaves.left.and.right")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 14)
+            linkAction("Dishy", help: "Open the dish status page at \(StarlinkProbe.dishyURL.absoluteString)") {
+                model.openDishy()
+            }
+            if let url = model.starlinkDashboardURL {
+                linkAction("Dashboard", help: "Open \(url.absoluteString)") { model.openDashboard() }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// A link-style button. The headless renderer cannot draw the AppKit button (it paints a
+    /// placeholder, same class as the segmented control), so the screenshot gets a plain
+    /// accent-coloured Text stand-in and the live panel gets the real control.
+    @ViewBuilder
+    private func linkAction(_ title: String, help: String, action: @escaping () -> Void) -> some View {
+        if DemoFixture.renderPath != nil {
+            Text(title)
+                .font(.system(size: 11))
+                .foregroundStyle(Color.accentColor)
+        } else {
+            Button(title, action: action)
+                .buttonStyle(.link)
+                .font(.system(size: 11))
+                .help(help)
+        }
     }
 
     private var wifiRow: some View {

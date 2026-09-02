@@ -32,6 +32,10 @@ enum DemoFixture {
     static let linkKind = LinkKind.wifi
     static let linkMbps = 1200.0
     static let interfaceName = "en0"
+    static let interfaces = ["en0"]          // one candidate: the picker stays a plain row
+    static let starlinkReachable = true
+    /// Sample dashboard address; the real one is a per-machine default (README, "Starlink").
+    static let starlinkDashboardURL = URL(string: "https://example.com")!
     static let localIP = "10.0.1.42"
     static let routerIP = "10.0.1.1"
     static let publicIP = "203.0.113.17"   // RFC 5737 documentation range, never routable

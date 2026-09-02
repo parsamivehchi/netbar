@@ -6,7 +6,8 @@ import SystemConfiguration
 /// Efficiency contract (the whole point of this app):
 /// - sysctl NET_RT_IFLIST2 with 64-bit if_data64 counters - never getifaddrs, whose
 ///   if_data counters are u_int32_t and wrap in ~34 s at 1 Gbps.
-/// - Counts ONLY the primary interface (SCDynamicStore State:/Network/Global/IPv4).
+/// - Counts ONE interface: the primary (SCDynamicStore State:/Network/Global/IPv4), or the
+///   one the user pinned in the panel (v1.4 override) while it is present.
 ///   Summing all interfaces double-counts VPN traffic (utun + en0) and picks up awdl0.
 /// - The read buffer is grow-only and reused every tick; the walk allocates nothing.
 actor NetSampler {
@@ -17,6 +18,8 @@ actor NetSampler {
         var interfaceName: String?
         var router: String?
         var linkMbps: Double = 0   // ifi_baudrate; 0 when the driver does not report it
+        var primaryName: String?   // the system's primary interface, even when an override is counted
+        var overrideHonored = false   // true when `interfaceName` is the user's override
     }
 
     // Local constants: these are C macros and their Swift import is not guaranteed.
@@ -32,6 +35,24 @@ actor NetSampler {
     private let clock = ContinuousClock()
     private var lastTime: ContinuousClock.Instant?
 
+    // Interface override (v1.4): the user pinned one interface by BSD name. Its index is resolved
+    // here, never per tick; an index of 0 means "not present right now" and the tick falls back
+    // to the primary interface (re-resolved each tick while absent, so a VPN that comes back is
+    // picked up again).
+    private var override: String?
+    private var overrideIndex: UInt16 = 0
+
+    /// Pin sampling to one interface by BSD name; nil returns to the primary interface.
+    func setOverride(_ name: String?) {
+        override = name
+        overrideIndex = Self.index(of: name)
+        cachedName = nil   // the next tick re-resolves and resets the baseline
+    }
+
+    private static func index(of name: String?) -> UInt16 {
+        name.map { UInt16(truncatingIfNeeded: if_nametoindex($0)) } ?? 0
+    }
+
     /// Forget the counter baseline (call after display wake so the first delta is not huge).
     func resetBaseline() {
         lastIn = nil
@@ -41,16 +62,25 @@ actor NetSampler {
 
     func sample() -> Tick {
         let now = clock.now
-        let (name, router) = primaryInterface()
+        let (primary, router) = primaryInterface()
+        if let o = override, overrideIndex == 0 { overrideIndex = Self.index(of: o) }
+        let honored = override != nil && overrideIndex != 0
+        let name = honored ? override : primary
         if name != cachedName {
             cachedName = name
-            ifIndex = name.map { UInt16(truncatingIfNeeded: if_nametoindex($0)) } ?? 0
+            ifIndex = honored ? overrideIndex : Self.index(of: name)
             lastIn = nil
             lastOut = nil
         }
 
-        var tick = Tick(interfaceName: name, router: router)
+        var tick = Tick(interfaceName: name, router: router, primaryName: primary, overrideHonored: honored)
         guard ifIndex != 0, let (inBytes, outBytes, baud) = readCounters(ifIndex: ifIndex) else {
+            // The override's record vanished from the table (interface went down): forget its
+            // index so the next tick falls back to the primary interface.
+            if honored {
+                overrideIndex = 0
+                cachedName = nil
+            }
             lastIn = nil
             lastOut = nil
             lastTime = now
