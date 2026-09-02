@@ -13,6 +13,16 @@ enum DemoFixture {
         ProcessInfo.processInfo.environment["NETBAR_DEMO"] == "1"
     }
 
+    /// NETBAR_DEMO_PRIVACY=1 renders the panel with privacy mode on (masked rows).
+    static var privacy: Bool {
+        ProcessInfo.processInfo.environment["NETBAR_DEMO_PRIVACY"] == "1"
+    }
+
+    /// NETBAR_RENDER_LABEL=/abs/path.png renders the stacked menu bar label at 4x and exits.
+    static var labelRenderPath: String? {
+        ProcessInfo.processInfo.environment["NETBAR_RENDER_LABEL"]
+    }
+
     static var renderPath: String? {
         ProcessInfo.processInfo.environment["NETBAR_RENDER_PANEL"]
     }

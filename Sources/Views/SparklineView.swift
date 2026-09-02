@@ -6,10 +6,16 @@ import SwiftUI
 struct SparklineView: View {
     let model: AppViewModel
     let samples: [SpeedSample]  // oldest -> newest
+    let peak: Double            // shared Y scale, shown as the top-right label
 
     var body: some View {
         GeometryReader { geo in
             Canvas { context, size in
+                // Faint baseline so an idle (flat) chart still reads as a chart.
+                var base = Path()
+                base.move(to: CGPoint(x: 0, y: size.height - 1))
+                base.addLine(to: CGPoint(x: size.width, y: size.height - 1))
+                context.stroke(base, with: .color(.secondary.opacity(0.25)), style: StrokeStyle(lineWidth: 1, dash: [2, 3]))
                 guard samples.count > 1 else { return }
                 let maxValue = maxV
                 context.stroke(path(\.downMbps, in: size, maxValue: maxValue),
@@ -40,6 +46,15 @@ struct SparklineView: View {
                 case .ended:
                     model.hoverIndex = nil
                 }
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if peak > 0 {
+                Text(ScaledRate(mbps: peak, units: model.units).compact)
+                    .font(.system(size: 8))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary.opacity(0.8))
+                    .padding(.trailing, 1)
             }
         }
         .frame(height: 32)

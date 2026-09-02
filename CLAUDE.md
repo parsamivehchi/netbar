@@ -69,7 +69,14 @@ but `./build.sh` is the canonical path: xcodebuild fails on a CommandLineTools-o
 - Sampling pauses on `screensDidSleepNotification` and resets the counter baseline on
   wake (otherwise the first delta after wake is hours of traffic in one tick).
 - Public IP fetch lives ONLY in PanelView's `.task` (cancelled on close), so a
-  background fetch is structurally impossible. Keep it that way.
+  background fetch is structurally impossible. Keep it that way. The `publicIPLookup`
+  preference (v1.2) can disable it entirely; honour it before every fetch.
+- **Units and scaling live in `Models/RateFormat.swift` (v1.2)** - `ScaledRate` is the ONE
+  place a rate becomes text (label, wide label, header, stats, sparkline scale). Bits by
+  default, bytes via the `units` preference; the label's cache key includes the unit and the
+  dim flags. Never format a rate inline in a view.
+- **Privacy mode must not leak through the clipboard**: `copyRow` refuses masked identifying
+  rows; the reveal window is memory-only. Demo renders force it with `NETBAR_DEMO_PRIVACY=1`.
 - SSID needs Location Services (macOS 14+); the panel must show the grant affordance,
   never a blank row. Pattern ported from battcal's WiFiMonitor.
 - Ad-hoc signing: each rebuild changes the signature and can invalidate the TCC grant
@@ -92,10 +99,11 @@ does not reach the page by itself. On every release:
    (two places: button label and the meta line) and the Details list if specs changed
 4. `npm run gate` there, ship via auto-ship, `npm run deploy`, verify `x-build` == HEAD
    and the zip byte-count at https://mivehchi.app/downloads/NetBar.zip
-5. If the panel changed visually: regenerate the screenshot from the DEMO FIXTURE, never a
-   live capture (`NETBAR_DEMO=1 NETBAR_RENDER_PANEL=$PWD/docs/panel.png build/NetBar.app/Contents/MacOS/NetBar`),
-   copy it to `domains/mivehchi.app/public/netbar/panel-demo.png`, and re-capture the gallery
-   shot. `bash ~/.claude/scripts/pii-scan.sh . --images` must be green in BOTH repos
+5. If the panel changed visually: regenerate the three renders from the DEMO FIXTURE, never a
+   live capture (`NETBAR_DEMO=1 NETBAR_RENDER_PANEL=$PWD/docs/panel.png ...`, plus
+   `NETBAR_DEMO_PRIVACY=1` for `docs/panel-privacy.png` and `NETBAR_RENDER_LABEL` for
+   `docs/menubar.png`), copy them to `domains/mivehchi.app/public/netbar/{panel-demo,panel-privacy,menubar}.png`,
+   and re-capture the gallery shot. `bash ~/.claude/scripts/pii-scan.sh . --images` must be green in BOTH repos
    (rules/public-demo-privacy.md - the first public shot leaked a real SSID + WAN IP).
 
 ## Public repo (since 2026-09-01)
@@ -109,7 +117,8 @@ its stamp. Session archives (`progress/`, `.claude/`) are gitignored on purpose.
 
 Release build, panel CLOSED, no AX polling during the window: take a
 `ps -o cputime= -p <pid>` DELTA over 60 s (target < 0.30 s = 0.5% avg) and read
-memory via `footprint -p <pid>` (target < 50 MB; measured 16 MB). ps %cpu decays and
+memory via `footprint -p <pid>` (target < 50 MB; measured 16 MB). v1.2 (units + dimming +
+stats): 0.20 s / 60 s = 0.33% including launch, 16 MB. ps %cpu decays and
 AX queries inflate the target process; `footprint` is the honest memory number, not
 ps rss. Throughput correctness: run `networkQuality` and watch the label track its
 reported down/uplink (measured: label ↓760 peak vs 654 Mbps downlink).
