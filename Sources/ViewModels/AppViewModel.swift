@@ -123,6 +123,65 @@ final class AppViewModel {
         refreshLabel(with: current, force: true)
     }
 
+    // MARK: - Interface override (v1.4)
+
+    // nil = follow the system's primary interface. Validated on read: a BSD name is lowercase
+    // letters then digits, and anything else in storage is discarded (validate, never trust).
+    private(set) var interfaceOverride: String? = {
+        guard let raw = UserDefaults.standard.string(forKey: "interfaceOverride"),
+              AppViewModel.isBSDName(raw) else { return nil }
+        return raw
+    }()
+
+    static func isBSDName(_ s: String) -> Bool {
+        guard s.count <= 16, let firstDigit = s.firstIndex(where: \.isNumber),
+              firstDigit != s.startIndex else { return false }
+        return s[..<firstDigit].allSatisfy { $0.isLetter && $0.isLowercase }
+            && s[firstDigit...].allSatisfy(\.isNumber)
+    }
+
+    /// Pin the counted interface (nil = auto). Session totals and the ring are kept: the session
+    /// belongs to the app, not to one interface; the first delta after a switch is zero.
+    func setInterfaceOverride(_ name: String?) {
+        let v = name.flatMap { Self.isBSDName($0) ? $0 : nil }
+        guard v != interfaceOverride else { return }
+        interfaceOverride = v
+        if let v {
+            UserDefaults.standard.set(v, forKey: "interfaceOverride")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "interfaceOverride")
+        }
+        guard !DemoFixture.isActive else { return }
+        Task { [sampler] in await sampler.setOverride(v) }
+    }
+
+    // MARK: - Starlink (v1.4)
+
+    /// Last-known dish reachability, probed only on panel open (one LAN-only TCP handshake, see
+    /// StarlinkProbe). nil = never probed. Kept across opens so the row renders at once.
+    private(set) var starlinkReachable: Bool?
+    /// Optional custom dashboard from the `starlinkDashboardURL` default: https with a host, or
+    /// the button stays hidden. Re-read on every panel open so `defaults write` needs no relaunch.
+    private(set) var starlinkDashboardURL: URL? =
+        AppViewModel.validDashboardURL(UserDefaults.standard.string(forKey: "starlinkDashboardURL"))
+
+    static func validDashboardURL(_ raw: String?) -> URL? {
+        guard let raw,
+              let url = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+              url.scheme?.lowercased() == "https",
+              let host = url.host, !host.isEmpty else { return nil }
+        return url
+    }
+
+    func openDishy() {
+        NSWorkspace.shared.open(StarlinkProbe.dishyURL)
+    }
+
+    func openDashboard() {
+        guard let url = starlinkDashboardURL else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     // Live state (observed only while the panel is open)
     private(set) var current = SpeedSample.zero
     private(set) var ring = RingBuffer(capacity: 60)
@@ -131,6 +190,11 @@ final class AppViewModel {
     private(set) var interfaceName: String?
     private(set) var linkKind: LinkKind = .other
     private(set) var linkMbps: Double = 0
+    private(set) var primaryInterfaceName: String?
+    /// True when the counted interface is the user's override (false = auto, or a fallback).
+    private(set) var overrideHonored = false
+    /// Interfaces up with an IPv4 address; refreshed on panel open (picker candidates).
+    private(set) var interfaces: [String] = []
     /// True while the popover is showing (the only time the sparkline and rows are observed).
     private(set) var panelOpen = false
     private var idleTicks = 0
@@ -174,6 +238,10 @@ final class AppViewModel {
         interfaceName = DemoFixture.interfaceName
         linkKind = DemoFixture.linkKind
         linkMbps = DemoFixture.linkMbps
+        primaryInterfaceName = DemoFixture.interfaceName
+        interfaces = DemoFixture.interfaces
+        starlinkReachable = DemoFixture.starlinkReachable
+        starlinkDashboardURL = DemoFixture.starlinkDashboardURL
         wifi.seedDemo(DemoFixture.radio)
         routerIP = DemoFixture.routerIP
         localIP = DemoFixture.localIP
@@ -193,6 +261,7 @@ final class AppViewModel {
     private func startSampling() {
         samplingTask?.cancel()
         samplingTask = Task { [sampler] in
+            await sampler.setOverride(self.interfaceOverride)
             await sampler.resetBaseline()
             while !Task.isCancelled {
                 let tick = await sampler.sample()
@@ -227,6 +296,8 @@ final class AppViewModel {
         }
         if tick.router != routerIP { routerIP = tick.router }
         if tick.linkMbps != linkMbps { linkMbps = tick.linkMbps }
+        if tick.primaryName != primaryInterfaceName { primaryInterfaceName = tick.primaryName }
+        if tick.overrideHonored != overrideHonored { overrideHonored = tick.overrideHonored }
         // "Quiet" for cadence purposes is looser than "dim": background chatter of a few
         // hundred Kb/s is still quiet enough to sample every 4 s.
         let idle = tick.sample.downMbps < Self.quietMbps && tick.sample.upMbps < Self.quietMbps
@@ -346,13 +417,21 @@ final class AppViewModel {
         wifi.read()
         if linkKind == .wifi { wifi.readRadio() }
         loginItem.refresh()
+        interfaces = NetworkInfo.upInterfaces()
         localIP = interfaceName.flatMap { NetworkInfo.localIPv4(interface: $0) }
-        guard publicIPLookup else { return }
-        fetchingPublicIP = true
-        let ip = await publicIPService.fetch()
+        starlinkDashboardURL = Self.validDashboardURL(UserDefaults.standard.string(forKey: "starlinkDashboardURL"))
+        // The dish probe and the WAN lookup run CONCURRENTLY: sequential would make the public IP
+        // row wait the full probe timeout on every non-Starlink network.
+        async let dish = StarlinkProbe.reachable()
+        if publicIPLookup {
+            fetchingPublicIP = true
+            let ip = await publicIPService.fetch()
+            if !Task.isCancelled, let ip { publicIP = ip }
+            fetchingPublicIP = false
+        }
+        let reachable = await dish
         guard !Task.isCancelled else { return }
-        if let ip { publicIP = ip }
-        fetchingPublicIP = false
+        starlinkReachable = reachable
     }
 
     // MARK: - Formatting

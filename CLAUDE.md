@@ -71,8 +71,29 @@ but `./build.sh` is the canonical path: xcodebuild fails on a CommandLineTools-o
 - Counters come from `sysctl NET_RT_IFLIST2` (64-bit `if_data64`), never `getifaddrs`
   (32-bit counters wrap in ~34 s at 1 Gbps). Walk records with `loadUnaligned`, never
   `load(as:)` - records are packed at `ifm_msglen` strides.
-- Count ONLY the primary interface (SCDynamicStore `State:/Network/Global/IPv4` ->
-  `PrimaryInterface`). Summing interfaces double-counts VPN traffic (utun + en0).
+- **Count ONE interface, never a sum.** The primary (SCDynamicStore `State:/Network/Global/IPv4`
+  -> `PrimaryInterface`) or, since v1.4, the one the user pinned in the panel's Interface picker
+  (`interfaceOverride` default, validated as a BSD name on read; `NetSampler.setOverride`
+  resolves its index ONCE, never per tick; while the pinned interface is absent the tick falls
+  back to the primary and the row reads "down, using auto"). Summing interfaces double-counts
+  VPN traffic (utun + en0). The picker appears only with >= 2 candidates from
+  `NetworkInfo.upInterfaces()` (getifaddrs, panel-open only, plumbing interfaces dropped).
+- **Starlink (v1.4)**: `StarlinkProbe.reachable()` is ONE TCP handshake to the dish's fixed,
+  documented `192.168.100.1:9200` with a 500 ms timeout, run ONLY from `panelOpened` and
+  CONCURRENTLY with the public IP fetch (`async let`), never on the sampling path. LAN-only, so
+  zero satellite bytes; bypass mode without a static route reads unreachable (accepted, same
+  blind spot netstats documents). Dishy opens `http://192.168.100.1`; the Dashboard link reads
+  the `starlinkDashboardURL` default (https with a host, else hidden), re-read on every panel
+  open. The dev Mac seeds it at deploy time:
+  `defaults write com.parsa.netbar starlinkDashboardURL https://mivehchi.space`. `Info.plist`
+  carries `NSLocalNetworkUsageDescription`; no Local Network prompt appeared for the off-subnet
+  unicast on macOS 27 (verified 2026-09-02). `pii-scan.sh` WARNs on the dish literal (lan-ipv4),
+  never HITs: it is the vendor's published address, not owner data.
+- **Off-window rendering (`NETBAR_RENDER_PANEL`)**: the AppKit segmented control, the menu
+  Picker and link-style Buttons all paint placeholders under ImageRenderer. `RenderedSegments`
+  and `linkAction` swap in SwiftUI stand-ins in render mode, and the demo fixture keeps ONE
+  interface so the Interface row takes the plain branch. Any new AppKit-backed control needs the
+  same treatment or the product render ships a yellow box.
 - Sampling pauses on `screensDidSleepNotification` and resets the counter baseline on
   wake (otherwise the first delta after wake is hours of traffic in one tick).
 - Public IP fetch lives ONLY in PanelView's `.task` (cancelled on close), so a
@@ -92,7 +113,11 @@ but `./build.sh` is the canonical path: xcodebuild fails on a CommandLineTools-o
 - Verifying the item/label: on macOS 27 status items are NOT app-owned CGWindowList
   windows (MenuBarAgent composites them). Probe via AX:
   `osascript -e 'tell application "System Events" to tell application process "NetBar" to get name of menu bar item 1 of menu bar 2'`
-  returns the live label text.
+  returns the live label text. The open PANEL is not an AX window of NetBar and a plain
+  `screencapture -x` skips it (window layer 101): find it with `CGWindowListCopyWindowInfo`
+  filtered on owner `NetBar`, then `screencapture -x -o -l <id> out.png`. An AX `click` on the
+  item toggles the panel, so count clicks; a click within ~20 s of a cold launch did not open it
+  (verify the label via AX and the panel by relaunch + capture only on a settled process).
 
 ## Distribution (public page - keep in sync on every release)
 
