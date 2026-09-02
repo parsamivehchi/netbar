@@ -151,7 +151,9 @@ Release build, panel CLOSED, no AX polling during the window: take a
 `ps -o cputime= -p <pid>` DELTA over 60 s (target < 0.30 s = 0.5% avg) and read
 memory via `footprint -p <pid>` (target < 50 MB; measured 16 MB). v1.2 (units + dimming +
 stats): 0.20 s / 60 s = 0.33% including launch, 16 MB. v1.3 (adaptive cadence, single sysctl,
-link row): 0.30 s / 120 s settled = 0.25%, 17 MB, with ~1 Mb/s of real background traffic. ps %cpu decays and
+link row): 0.30 s / 120 s settled = 0.25%, 17 MB, with ~1 Mb/s of real background traffic. v1.4
+(picker + Starlink probe, both panel-open only): 0.34 s / 120 s settled = 0.28%, 16 MB, a VPN
+utun up next to Wi-Fi. ps %cpu decays and
 AX queries inflate the target process; `footprint` is the honest memory number, not
 ps rss. Throughput correctness: run `networkQuality` and watch the label track its
 reported down/uplink (measured: label ↓760 peak vs 654 Mbps downlink).
