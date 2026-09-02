@@ -50,6 +50,13 @@ but `./build.sh` is the canonical path: xcodebuild fails on a CommandLineTools-o
 - **Start the engine from AppViewModel.init, never a view's .task.** A menu bar item
   collapsed into the notch overflow never displays its label, so a label-lifecycle
   start leaves the app sampling nothing (bit on first launch 2026-09-01).
+- **Adaptive cadence (v1.3)**: `cadence` is 2 s while the panel is open or traffic moves,
+  4 s after 10 ticks under `quietMbps` (0.5) on both lines, 6 s under Low Power Mode; sleep
+  tolerance is cadence/4. `readCounters` is ONE sysctl into the reused buffer, probing the size
+  only on ENOMEM. Sub-Mb values quantize to 50 Kb so idle chatter never changes the label.
+  Link kind resolves via `LinkInfo.kind(of:)` ONCE per interface name (SCNetworkInterfaceCopyAll
+  walks the whole config; never per tick). Radio details (`WiFiMonitor.readRadio`) only in
+  `panelOpened`.
 - **The menu bar label is fixed-width and 2 s cadence.** Values pad to 4 chars with
   figure spaces (U+2007) + monospacedDigit; a width change forces a bar-wide relayout.
   Together with the assign-only-on-change gate this took closed-panel CPU from 1.15%
@@ -118,7 +125,8 @@ its stamp. Session archives (`progress/`, `.claude/`) are gitignored on purpose.
 Release build, panel CLOSED, no AX polling during the window: take a
 `ps -o cputime= -p <pid>` DELTA over 60 s (target < 0.30 s = 0.5% avg) and read
 memory via `footprint -p <pid>` (target < 50 MB; measured 16 MB). v1.2 (units + dimming +
-stats): 0.20 s / 60 s = 0.33% including launch, 16 MB. ps %cpu decays and
+stats): 0.20 s / 60 s = 0.33% including launch, 16 MB. v1.3 (adaptive cadence, single sysctl,
+link row): 0.30 s / 120 s settled = 0.25%, 17 MB, with ~1 Mb/s of real background traffic. ps %cpu decays and
 AX queries inflate the target process; `footprint` is the honest memory number, not
 ps rss. Throughput correctness: run `networkQuality` and watch the label track its
 reported down/uplink (measured: label ↓760 peak vs 654 Mbps downlink).

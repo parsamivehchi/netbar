@@ -25,6 +25,7 @@ struct PanelView: View {
         .padding(10)
         .frame(width: 264)
         .task { await model.panelOpened() }
+        .onDisappear { model.panelClosed() }
     }
 
     // MARK: - Header
@@ -88,7 +89,8 @@ struct PanelView: View {
 
     private var infoRows: some View {
         VStack(alignment: .leading, spacing: 3) {
-            wifiRow
+            linkRow
+            if model.linkKind == .wifi { wifiRow }
             row("Interface", model.interfaceName, identifying: false)
             row("Local IP", model.localIP, identifying: true)
             row("Router", model.routerIP, identifying: true)
@@ -105,14 +107,57 @@ struct PanelView: View {
         }
     }
 
+    /// Wi-Fi: signal bars, band, channel, Wi-Fi generation, link rate.
+    /// Ethernet / VPN / other: kind + negotiated link speed when the driver reports one.
+    private var linkRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            rowLabel(linkTitle)
+            Image(systemName: model.linkKind.symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 14)
+            Text(linkText)
+                .font(.system(size: 11, weight: .medium))
+                .monospacedDigit()
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .help(linkHelp)
+    }
+
+    /// Row label doubles as the generation / kind: "Wi-Fi 6", "Ethernet", "VPN".
+    private var linkTitle: String {
+        if model.linkKind == .wifi, let r = model.wifi.radio, !r.phyMode.isEmpty { return r.phyMode }
+        return model.linkKind.title
+    }
+
+    private var linkText: String {
+        switch model.linkKind {
+        case .wifi:
+            guard let r = model.wifi.radio else { return "connected" }
+            var parts: [String] = [String(repeating: "\u{25AE}", count: r.bars) + String(repeating: "\u{25AF}", count: 4 - r.bars)]
+            if !r.band.isEmpty { parts.append(r.band) }
+            if r.txRateMbps > 0 { parts.append(ScaledRate(mbps: r.txRateMbps, units: .bits).compact) }
+            return parts.joined(separator: " \u{00B7} ")
+        default:
+            return model.linkMbps > 0 ? "\(ScaledRate(mbps: model.linkMbps, units: .bits).compact) link" : "connected"
+        }
+    }
+
+    private var linkHelp: String {
+        if model.linkKind == .wifi, let r = model.wifi.radio {
+            return "Signal \(r.rssi) dBm, noise \(r.noise) dBm, link rate \(Int(r.txRateMbps)) Mb/s"
+        }
+        return model.linkMbps > 0 ? "Negotiated link speed \(Int(model.linkMbps)) Mb/s" : model.linkKind.title
+    }
+
     private var wifiRow: some View {
         HStack(alignment: .firstTextBaseline) {
-            rowLabel("Wi-Fi")
+            rowLabel("Network")
             if model.wifi.authorized {
                 let ssid = model.wifi.ssid
                 let shown = ssid.map { model.identifiersVisible ? $0 : Self.mask } ?? "Not connected"
-                copyable(shown, copied: model.copiedKey == "Wi-Fi", masked: !model.identifiersVisible && ssid != nil) {
-                    model.copyRow(label: "Wi-Fi", value: ssid, identifying: true)
+                copyable(shown, copied: model.copiedKey == "Network", masked: !model.identifiersVisible && ssid != nil) {
+                    model.copyRow(label: "Network", value: ssid, identifying: true)
                 }
             } else if model.wifi.auth == .notDetermined {
                 Button("Grant access") { model.wifi.requestAuth() }

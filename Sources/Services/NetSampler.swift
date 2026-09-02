@@ -16,6 +16,7 @@ actor NetSampler {
         var deltaOutBytes: UInt64 = 0
         var interfaceName: String?
         var router: String?
+        var linkMbps: Double = 0   // ifi_baudrate; 0 when the driver does not report it
     }
 
     // Local constants: these are C macros and their Swift import is not guaranteed.
@@ -49,7 +50,7 @@ actor NetSampler {
         }
 
         var tick = Tick(interfaceName: name, router: router)
-        guard ifIndex != 0, let (inBytes, outBytes) = readCounters(ifIndex: ifIndex) else {
+        guard ifIndex != 0, let (inBytes, outBytes, baud) = readCounters(ifIndex: ifIndex) else {
             lastIn = nil
             lastOut = nil
             lastTime = now
@@ -60,6 +61,7 @@ actor NetSampler {
             lastOut = outBytes
             lastTime = now
         }
+        tick.linkMbps = Double(baud) / 1_000_000
         guard let li = lastIn, let lo = lastOut, let lt = lastTime else { return tick }
         let elapsed = lt.duration(to: now)
         let secs = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) * 1e-18
@@ -90,18 +92,22 @@ actor NetSampler {
 
     // MARK: - Counter read (sysctl NET_RT_IFLIST2)
 
-    private func readCounters(ifIndex: UInt16) -> (UInt64, UInt64)? {
+    // One syscall per tick, not two (v1.3): fetch straight into the reused buffer and only
+    // fall back to the size probe + regrow when the kernel answers ENOMEM. The table size
+    // changes only when interfaces come and go, so the probe almost never runs.
+    private func readCounters(ifIndex: UInt16) -> (UInt64, UInt64, UInt64)? {
         var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, 0, netRtIflist2, 0]
-        var len = 0
-        guard sysctl(&mib, 6, nil, &len, nil, 0) == 0 else { return nil }
-        len += 2048  // slack: the table can grow between the size call and the fetch
-        if buf.count < len {
-            buf = [UInt8](repeating: 0, count: len)
-        }
         var actual = buf.count
-        guard sysctl(&mib, 6, &buf, &actual, nil, 0) == 0 else { return nil }
+        if sysctl(&mib, 6, &buf, &actual, nil, 0) != 0 {
+            guard errno == ENOMEM else { return nil }
+            var len = 0
+            guard sysctl(&mib, 6, nil, &len, nil, 0) == 0 else { return nil }
+            buf = [UInt8](repeating: 0, count: len + 4096)
+            actual = buf.count
+            guard sysctl(&mib, 6, &buf, &actual, nil, 0) == 0 else { return nil }
+        }
 
-        return buf.withUnsafeBytes { raw -> (UInt64, UInt64)? in
+        return buf.withUnsafeBytes { raw -> (UInt64, UInt64, UInt64)? in
             var off = 0
             // Records are packed at ifm_msglen strides with no alignment guarantee:
             // loadUnaligned only, never load(as:).
@@ -112,7 +118,7 @@ actor NetSampler {
                 if type == rtmIfinfo2, off + MemoryLayout<if_msghdr2>.size <= actual {
                     let msg = raw.loadUnaligned(fromByteOffset: off, as: if_msghdr2.self)
                     if msg.ifm_index == ifIndex {
-                        return (msg.ifm_data.ifi_ibytes, msg.ifm_data.ifi_obytes)
+                        return (msg.ifm_data.ifi_ibytes, msg.ifm_data.ifi_obytes, msg.ifm_data.ifi_baudrate)
                     }
                 }
                 off += msglen

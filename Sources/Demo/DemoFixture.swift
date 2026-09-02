@@ -28,6 +28,9 @@ enum DemoFixture {
     }
 
     static let ssid = "HomeNet-5G"
+    static let radio = WiFiMonitor.Radio(rssi: -54, noise: -91, txRateMbps: 1200, band: "5 GHz", channel: 44, phyMode: "Wi-Fi 6")
+    static let linkKind = LinkKind.wifi
+    static let linkMbps = 1200.0
     static let interfaceName = "en0"
     static let localIP = "10.0.1.42"
     static let routerIP = "10.0.1.1"
