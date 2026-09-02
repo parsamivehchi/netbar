@@ -1,6 +1,6 @@
 # netbar
 
-NetBar - native SwiftUI menu bar network monitor for the MacBook Air. Shows live
+NetBar - native SwiftUI menu bar network monitor for macOS (Apple silicon). Shows live
 down/up throughput in the menu bar - default is a STACKED two-line ~35px item
 (`↓12.4` over `↑0.8`, 9pt); a panel picker switches to the wide one-line
 `↓12.4 ↑0.8 Mbps` form (persisted `barStyle` in UserDefaults, validated on read); the
@@ -24,7 +24,7 @@ Follow [iOS conventions](~/.claude/conventions/ios.md).
 
 - Skip: GRDB (no database - live kernel counters only)
 - Skip: Keychain (no secrets)
-- Skip: XcodeGen as the primary build (the Air has no Xcode; see build note below)
+- Skip: XcodeGen as the primary build (the dev machine has no Xcode; see build note below)
 
 ## Build + deploy
 
@@ -38,7 +38,7 @@ open ~/Applications/NetBar.app
 ```
 
 `project.yml` is kept for machines WITH full Xcode (`xcodegen generate` + xcodebuild),
-but `./build.sh` is the canonical path: this machine's xcodebuild fails without Xcode.
+but `./build.sh` is the canonical path: xcodebuild fails on a CommandLineTools-only machine.
 
 ## Hard-won constraints (do not regress)
 
@@ -92,6 +92,18 @@ does not reach the page by itself. On every release:
    (two places: button label and the meta line) and the Details list if specs changed
 4. `npm run gate` there, ship via auto-ship, `npm run deploy`, verify `x-build` == HEAD
    and the zip byte-count at https://mivehchi.app/downloads/NetBar.zip
+5. If the panel changed visually: regenerate the screenshot from the DEMO FIXTURE, never a
+   live capture (`NETBAR_DEMO=1 NETBAR_RENDER_PANEL=$PWD/docs/panel.png build/NetBar.app/Contents/MacOS/NetBar`),
+   copy it to `domains/mivehchi.app/public/netbar/panel-demo.png`, and re-capture the gallery
+   shot. `bash ~/.claude/scripts/pii-scan.sh . --images` must be green in BOTH repos
+   (rules/public-demo-privacy.md - the first public shot leaked a real SSID + WAN IP).
+
+## Public repo (since 2026-09-01)
+
+`parsamivehchi/netbar` is PUBLIC and pinned. Nothing machine-specific or personal goes in:
+no home paths, no hostnames, no real network values anywhere (code, fixtures, docs, images).
+`pii-scan.sh . --images --history` is the gate; the guard blocks a visibility flip without
+its stamp. Session archives (`progress/`, `.claude/`) are gitignored on purpose.
 
 ## Efficiency gate (run before claiming "efficient")
 

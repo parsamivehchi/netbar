@@ -126,16 +126,23 @@ struct PanelView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .frame(width: labelColumn, alignment: .leading)
-                Picker("Bar style", selection: Binding(
-                    get: { model.barStyle },
-                    set: { model.setBarStyle($0) }
-                )) {
-                    Text("Stacked").tag(BarStyle.stacked)
-                    Text("Wide").tag(BarStyle.wide)
+                if DemoFixture.renderPath != nil {
+                    // Headless render only: the segmented Picker is an AppKit control
+                    // that ImageRenderer cannot draw off-window, so the screenshot
+                    // shows a SwiftUI facsimile of the same two segments.
+                    RenderedSegments(selected: model.barStyle)
+                } else {
+                    Picker("Bar style", selection: Binding(
+                        get: { model.barStyle },
+                        set: { model.setBarStyle($0) }
+                    )) {
+                        Text("Stacked").tag(BarStyle.stacked)
+                        Text("Wide").tag(BarStyle.wide)
+                    }
+                    .pickerStyle(.segmented)
+                    .controlSize(.small)
+                    .labelsHidden()
                 }
-                .pickerStyle(.segmented)
-                .controlSize(.small)
-                .labelsHidden()
             }
             HStack {
                 Toggle("Launch at login", isOn: Binding(
@@ -181,5 +188,30 @@ private struct InfoRow: View {
                 .textSelection(.enabled)
             Spacer(minLength: 0)
         }
+    }
+}
+
+/// Static look-alike of the small segmented control, used only by PanelRenderer.
+private struct RenderedSegments: View {
+    let selected: BarStyle
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(BarStyle.allCases, id: \.self) { style in
+                Text(style == .stacked ? "Stacked" : "Wide")
+                    .font(.system(size: 11))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(style == selected ? Color.white.opacity(0.22) : Color.clear)
+                    )
+            }
+        }
+        .padding(2)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.white.opacity(0.08))
+        )
     }
 }

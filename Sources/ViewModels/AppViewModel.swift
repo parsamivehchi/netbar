@@ -45,7 +45,7 @@ final class AppViewModel {
     // the CLT toolchain cannot expand - see CLAUDE.md). nil = not hovering.
     var hoverIndex: Int?
 
-    let wifi = WiFiMonitor()
+    let wifi: WiFiMonitor
     let loginItem = LoginItemService()
 
     private let sampler = NetSampler()
@@ -54,15 +54,35 @@ final class AppViewModel {
     private var watcherTasks: [Task<Void, Never>] = []
 
     init() {
+        if DemoFixture.isActive {
+            // Screenshot mode: synthetic values only, nothing is sampled or fetched.
+            wifi = WiFiMonitor(demoSSID: DemoFixture.ssid)
+            seedDemo()
+            return
+        }
+        wifi = WiFiMonitor()
         // Start from init, NOT from the label view's .task: a menu bar item collapsed
         // into the notch/overflow chevron never displays its label, so a view-lifecycle
         // start would leave the app sampling nothing (bit on first launch, 2026-09-01).
         start()
     }
 
+    private func seedDemo() {
+        barStyle = .stacked  // the shipped default, whatever this Mac has persisted
+        for sample in DemoFixture.samples { ring.append(sample) }
+        current = DemoFixture.current
+        totalInBytes = DemoFixture.totalInBytes
+        totalOutBytes = DemoFixture.totalOutBytes
+        interfaceName = DemoFixture.interfaceName
+        routerIP = DemoFixture.routerIP
+        localIP = DemoFixture.localIP
+        publicIP = DemoFixture.publicIP
+        refreshLabel(with: current, force: true)
+    }
+
     /// Idempotent: the MenuBarExtra label's .task may also call this if the label renders.
     func start() {
-        guard watcherTasks.isEmpty else { return }
+        guard !DemoFixture.isActive, watcherTasks.isEmpty else { return }
         startSampling()
         watchDisplaySleep()
     }
@@ -169,6 +189,7 @@ final class AppViewModel {
     // MARK: - Panel-open work (the only place network info + public IP refresh)
 
     func panelOpened() async {
+        guard !DemoFixture.isActive else { return }
         wifi.read()
         loginItem.refresh()
         localIP = interfaceName.flatMap { NetworkInfo.localIPv4(interface: $0) }
