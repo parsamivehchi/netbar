@@ -129,6 +129,11 @@ final class AppViewModel {
     private(set) var totalInBytes: UInt64 = 0
     private(set) var totalOutBytes: UInt64 = 0
     private(set) var interfaceName: String?
+    private(set) var linkKind: LinkKind = .other
+    private(set) var linkMbps: Double = 0
+    /// True while the popover is showing (the only time the sparkline and rows are observed).
+    private(set) var panelOpen = false
+    private var idleTicks = 0
     private(set) var routerIP: String?
     private(set) var localIP: String?
     private(set) var publicIP: String?
@@ -167,6 +172,9 @@ final class AppViewModel {
         totalInBytes = DemoFixture.totalInBytes
         totalOutBytes = DemoFixture.totalOutBytes
         interfaceName = DemoFixture.interfaceName
+        linkKind = DemoFixture.linkKind
+        linkMbps = DemoFixture.linkMbps
+        wifi.seedDemo(DemoFixture.radio)
         routerIP = DemoFixture.routerIP
         localIP = DemoFixture.localIP
         publicIP = DemoFixture.publicIP
@@ -190,11 +198,22 @@ final class AppViewModel {
                 let tick = await sampler.sample()
                 if Task.isCancelled { break }
                 self.apply(tick)
-                // 2 s cadence (iStat-class default): halves per-tick label work; the
-                // 60-slot ring then spans a 2 min sparkline window.
-                try? await Task.sleep(for: .seconds(2), tolerance: .seconds(0.5))
+                // Adaptive cadence (v1.3): 2 s while traffic moves or the panel is open;
+                // after ~20 s of idle the loop backs off to 4 s, and to 6 s under Low Power
+                // Mode. Fewer wakeups is the whole battery story for a 1 Hz-class app, and
+                // the label cannot change while the counters do not.
+                try? await Task.sleep(for: .seconds(self.cadence), tolerance: .seconds(self.cadence / 4))
             }
         }
+    }
+
+    /// Seconds until the next sample. Tolerance is set to a quarter of it so the kernel can
+    /// coalesce the timer with other wakeups.
+    private var cadence: Double {
+        if panelOpen { return 2 }
+        let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+        if idleTicks >= 10 { return lowPower ? 6 : 4 }
+        return lowPower ? 3 : 2
     }
 
     private func apply(_ tick: NetSampler.Tick) {
@@ -202,8 +221,16 @@ final class AppViewModel {
         ring.append(tick.sample)
         totalInBytes &+= tick.deltaInBytes
         totalOutBytes &+= tick.deltaOutBytes
-        if tick.interfaceName != interfaceName { interfaceName = tick.interfaceName }
+        if tick.interfaceName != interfaceName {
+            interfaceName = tick.interfaceName
+            linkKind = tick.interfaceName.map(LinkInfo.kind(of:)) ?? .other
+        }
         if tick.router != routerIP { routerIP = tick.router }
+        if tick.linkMbps != linkMbps { linkMbps = tick.linkMbps }
+        // "Quiet" for cadence purposes is looser than "dim": background chatter of a few
+        // hundred Kb/s is still quiet enough to sample every 4 s.
+        let idle = tick.sample.downMbps < Self.quietMbps && tick.sample.upMbps < Self.quietMbps
+        idleTicks = idle ? min(idleTicks + 1, 1_000) : 0
         refreshLabel(with: tick.sample, force: false)
     }
 
@@ -223,6 +250,8 @@ final class AppViewModel {
 
     /// Below this a line is drawn dimmed: the eye reads "quiet" without parsing a number.
     static let idleMbps = 0.05
+    /// Below this on BOTH lines for 10 ticks, sampling backs off (see `cadence`).
+    static let quietMbps = 0.5
 
     // At idle the label bounces between a handful of states (0.0/0.1 pairs), so a
     // small cache makes most ticks reuse an already-rendered image instead of
@@ -306,9 +335,16 @@ final class AppViewModel {
 
     // MARK: - Panel-open work (the only place network info + public IP refresh)
 
+    func panelClosed() {
+        panelOpen = false
+        hoverIndex = nil
+    }
+
     func panelOpened() async {
+        panelOpen = true
         guard !DemoFixture.isActive else { return }
         wifi.read()
+        if linkKind == .wifi { wifi.readRadio() }
         loginItem.refresh()
         localIP = interfaceName.flatMap { NetworkInfo.localIPv4(interface: $0) }
         guard publicIPLookup else { return }

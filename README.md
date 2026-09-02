@@ -25,7 +25,8 @@ Download: [mivehchi.app/netbar](https://mivehchi.app/netbar) (free, ~120 KB zip,
 | Menu bar | Stacked two-line item (`↓12.4Mb` over `↑812Kb`, about 40 px wide) by default, or a wide one-line `↓12.4Mb ↑812Kb` form. Values auto-scale (Kb / Mb / Gb per second, or KB / MB / GB) with the unit drawn smaller; a line under 50 Kb/s dims |
 | Panel header | Current down / up, plus the two-minute peak and average; hovering the sparkline swaps in that moment's values and its age |
 | Sparkline | 60 samples x 2 s = the last two minutes, down in the accent colour, up in grey, with the scale's top value labelled |
-| Rows | Wi-Fi SSID, primary interface, local IPv4, router, public IP (fetched only while the panel is open, cached 5 min, can be switched off), session totals with a since-time and a reset button. Click any value to copy it |
+| Link row | Wi-Fi: generation (Wi-Fi 6), signal bars, band, channel and link rate. Ethernet, VPN or cellular: the kind and the negotiated link speed |
+| Rows | Network name, primary interface, local IPv4, router, public IP (fetched only while the panel is open, cached 5 min, can be switched off), session totals with a since-time and a reset button. Click any value to copy it |
 | Footer | Bar style and unit pickers, privacy mode, public-IP lookup switch, launch-at-login (SMAppService), Quit |
 
 ## Privacy mode
@@ -81,12 +82,26 @@ NETBAR_DEMO=1 NETBAR_RENDER_LABEL="$PWD/docs/menubar.png" build/NetBar.app/Conte
 Use these for any screenshot you publish. A capture of a live session carries your real
 network name and addresses.
 
+## Battery
+
+NetBar is built to be forgotten about. Sampling runs at 2 s while traffic moves or the panel is
+open, backs off to 4 s after ten quiet ticks, and to 6 s under Low Power Mode; every sleep has a
+wide tolerance so macOS can coalesce the wakeup with others. Each tick is one `sysctl` call into a
+reused buffer (the size probe only reruns when an interface appears or vanishes). Sub-megabit
+rates are quantized to 50 Kb steps, so background chatter does not change the label, and an
+unchanged label means the cached image is reused and the menu bar is not asked to relayout.
+Wi-Fi radio details and the public IP are read only while the panel is open. Sampling pauses
+entirely while the displays sleep.
+
+Measured on a release build, panel closed, settled: 0.25% average CPU over 120 s and 17 MB.
+
 ## How it works
 
 - **Counters**: `sysctl NET_RT_IFLIST2` with 64-bit `if_data64` records (32-bit `getifaddrs`
   counters wrap in about 34 s at 1 Gbps), read every 2 s.
 - **One interface**: only the primary interface from `SCDynamicStore`
   (`State:/Network/Global/IPv4`), so VPN traffic is not double-counted across `utun` and `en0`.
+- **Adaptive cadence**: 2 s active, 4 s quiet, 6 s quiet under Low Power Mode; see Battery.
 - **Sleep aware**: sampling pauses when the displays sleep and the baseline resets on wake, so
   the first tick after wake is not hours of traffic at once.
 - **Menu bar cost**: the label is fixed-width (figure-space padded, monospaced digits) and only

@@ -26,7 +26,10 @@ struct ScaledRate: Equatable {
         } else if perSecond >= 0.9995 {
             value = String(format: "%.1f", perSecond); unit = m
         } else {
-            value = String(format: "%.0f", kilo); unit = k
+            // Below 1 Mb/s the digits are noise and every change costs a menu bar relayout:
+            // quantize to 50 Kb steps so background chatter (a few Kb/s) reads as a stable,
+            // dimmed 0 and the cached label image is reused tick after tick (v1.3).
+            value = String(format: "%.0f", (kilo / 50).rounded() * 50); unit = k
         }
     }
 
