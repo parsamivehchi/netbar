@@ -19,9 +19,9 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>NetBar checks whether a Starlink dish is on your network when the panel opens.</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.4</string>
+	<string>1.4.1</string>
 	<key>CFBundleVersion</key>
-	<string>5</string>
+	<string>6</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
 	<key>LSUIElement</key>
