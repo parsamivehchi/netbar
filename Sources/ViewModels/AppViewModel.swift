@@ -293,6 +293,13 @@ final class AppViewModel {
         if tick.interfaceName != interfaceName {
             interfaceName = tick.interfaceName
             linkKind = tick.interfaceName.map(LinkInfo.kind(of:)) ?? .other
+            // The Local IP row is otherwise filled once at panel open; a switch while the panel
+            // is showing (the picker, a VPN coming up) must move it too. getifaddrs runs only on
+            // this change and only while the panel is open, never on the idle sampling path.
+            if panelOpen {
+                localIP = tick.interfaceName.flatMap { NetworkInfo.localIPv4(interface: $0) }
+                if linkKind == .wifi { wifi.readRadio() }
+            }
         }
         if tick.router != routerIP { routerIP = tick.router }
         if tick.linkMbps != linkMbps { linkMbps = tick.linkMbps }
